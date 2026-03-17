@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>OmOi Online - Full</title>
+    <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+    <style>
+        :root { --primary: #0078d4; --bg: #0a0a0a; --panel: #1e1e1e; --accent: #00f0ff; --danger: #d11a2a; }
+        body { font-family: 'Segoe UI', sans-serif; background: var(--bg); color: white; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        
+        /* トップメニュー */
+        .top-nav { height: 65px; background: #252525; display: flex; align-items: center; padding: 0 15px; gap: 10px; border-bottom: 1px solid #333; }
+        .controls { display: flex; gap: 6px; background: #333; padding: 5px; border-radius: 8px; }
+        .btn { background: none; border: none; color: white; padding: 8px 12px; cursor: pointer; border-radius: 5px; font-size: 11px; display: flex; flex-direction: column; align-items: center; }
+        .btn:hover { background: #444; }
+        .btn.on { background: var(--primary); }
+        .btn.exit { background: var(--danger); }
+
+        /* メイン画面構成 */
+        .main-content { flex: 1; display: flex; overflow: hidden; }
+        #stage { flex: 3; display: none; background: #000; position: relative; border-right: 1px solid #333; }
+        #stage-wrap { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+        #stage video { max-width: 100%; max-height: 100%; border: 1px solid var(--accent); }
+
+        /* サイドバー */
+        .right-bar { width: 340px; display: flex; flex-direction: column; background: #161616; }
+        #video-grid { height: 250px; overflow-y: auto; padding: 10px; display: grid; gap: 10px; border-bottom: 1px solid #333; }
+        .video-box { position: relative; aspect-ratio: 16/9; background: #252525; border-radius: 8px; overflow: hidden; cursor: pointer; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .u-name-tag { position: absolute; bottom: 5px; left: 5px; background: rgba(0,0,0,0.7); padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+
+        /* チャットとファイル */
+        #chat-msgs { flex: 1; overflow-y: auto; padding: 10px; font-size: 13px; }
+        .chat-input-area { padding: 10px; background: #222; }
+        .preview-img { max-width: 150px; display: block; border-radius: 5px; margin-top: 5px; }
+
+        /* ログイン画面 */
+        .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); display: flex; justify-content: center; align-items: center; z-index: 10000; }
+        .modal { background: #252525; padding: 30px; border-radius: 15px; width: 350px; text-align: center; }
+        .modal input { width: 90%; padding: 10px; margin-bottom: 10px; background: #111; color: white; border: 1px solid #444; border-radius: 5px; }
+
+        /* エフェクト */
+        .vol-bar { position: absolute; bottom: 0; left: 0; height: 4px; background: #0f0; transition: width 0.1s; }
+        .vtuber { filter: contrast(150%) brightness(120%) hue-rotate(45deg) saturate(200%) !important; }
+        .emoji-fly { position: absolute; bottom: 100px; font-size: 40px; animation: fly 2s forwards; pointer-events: none; z-index: 2000; }
+        @keyframes fly { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-300px) translateX(30px); } }
+        .react-menu { position: absolute; bottom: 80px; left: 150px; background: #333; padding: 10px; border-radius: 10px; display: none; gap: 10px; }
+        .react-menu.show { display: flex; }
+    </style>
+</head>
+<body>
+
+<div id="login-overlay" class="overlay">
+    <div class="modal">
+        <h2>OmOi Online</h2>
+        <input type="text" id="class-code" placeholder="クラス (例: 7-3)">
+        <input type="text" id="u-name" placeholder="名前">
+        <button class="btn on" style="width:100%; height:50px;" onclick="start()">入室</button>
+    </div>
+</div>
+
+<div class="top-nav">
+    <input type="text" id="target-id" placeholder="接続先のID" style="background:#111; color:#0f0; border:1px solid #444; padding:5px; width:120px;">
+    <button class="btn on" onclick="join()">接続</button>
+    
+    <div class="controls">
+        <button id="mic-btn" class="btn on" onclick="toggleMic()">🎤<span>マイク</span></button>
+        <button id="cam-btn" class="btn on" onclick="toggleCam()">📷<span>カメラ</span></button>
+        <button id="share-btn" class="btn" onclick="toggleShare()">🖥️<span>共有</span></button>
+        <button class="btn" onclick="toggleReact()">😀<span>反応</span></button>
+        <button class="btn exit" onclick="exitRoom()">🚪<span>退出</span></button>
+    </div>
+    
+    <div style="margin-left:auto; text-align:right;">
+        <div id="my-id-display" style="font-size:14px; color:var(--accent); font-weight:bold;">ID: ---</div>
+        <div id="fps-display" style="font-size:10px;">FPS: --</div>
+    </div>
+</div>
+
+<div class="main-content">
+    <div id="stage"><div id="stage-wrap"></div></div>
+    <div class="right-bar">
+        <div id="video-grid">
+            <div class="video-box" id="local-box" onclick="pin('local-vid')">
+                <video id="local-vid" autoplay muted playsinline></video>
+                <div class="u-name-tag" id="my-tag">自分</div>
+                <div id="local-vol" class="vol-bar"></div>
+            </div>
+        </div>
+        <div id="chat-msgs"></div>
+        <div class="chat-input-area">
+            <input type="text" id="chat-input" placeholder="メッセージ..." style="width:75%; background:#111; color:white; border:1px solid #444; padding:5px;">
+            <button onclick="sendMsg()">送</button>
+            <div style="margin-top:5px;">
+                <button class="btn" style="display:inline; padding:4px;" onclick="document.getElementById('file-in').click()">📁ファイル</button>
+                <input type="file" id="file-in" style="display:none" onchange="sendFile(this)">
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="react-menu" class="react-menu">
+    <button onclick="sendReact('👏')">👏</button><button onclick="sendReact('🔥')">🔥</button>
+    <button onclick="sendReact('👍')">👍</button><button onclick="sendReact('🎉')">🎉</button>
+</div>
+
+<script>
+    let peer, myStream, shareStream, conns = {}, currentUser, isVTuber = false, cooldown = false;
+    let fpsCount = 0, lastTime = performance.now();
+
+    async function start() {
+        const name = document.getElementById('u-name').value;
+        const code = document.getElementById('class-code').value;
+        if(!name || !code) return alert("名前とクラスを入れてね");
+        currentUser = { name, code };
+        document.getElementById('my-tag').textContent = name;
+
+        myStream = await navigator.mediaDevices.getUserMedia({video: true, audio: true});
+        document.getElementById('local-vid').srcObject = myStream;
+        document.getElementById('login-overlay').style.display = 'none';
+
+        peer = new Peer(`${code}-${name}`); // 短縮ID設定
+
+        peer.on('open', id => {
+            document.getElementById('my-id-display').textContent = `あなたのID: ${id}`;
+            monitorAudio(myStream, 'local-vol');
+        });
+        peer.on('call', call => { call.answer(myStream); handleCall(call); });
+        peer.on('connection', conn => handleData(conn));
+        requestAnimationFrame(updateFPS);
+    }
+
+    function join() {
+        const id = document.getElementById('target-id').value;
+        if(!id) return;
+        handleCall(peer.call(id, myStream, {metadata: {name: currentUser.name}}));
+        handleData(peer.connect(id));
+    }
+
+    // 🖥️ 画面共有機能
+    async function toggleShare() {
+        if(shareStream) {
+            shareStream.getTracks().forEach(t => t.stop());
+            shareStream = null;
+            document.getElementById('stage').style.display = 'none';
+            document.getElementById('share-btn').classList.remove('on');
+            return;
+        }
+        try {
+            shareStream = await navigator.mediaDevices.getDisplayMedia({video: true});
+            showStage(shareStream);
+            document.getElementById('share-btn').classList.add('on');
+            // 接続中の全員に画面を送る
+            Object.values(conns).forEach(c => peer.call(c.peer, shareStream, {metadata: {type:'screen'}}));
+        } catch(e) { console.error(e); }
+    }
+
+    function handleCall(call) {
+        call.on('stream', s => {
+            if(call.metadata?.type === 'screen') return showStage(s);
+            if(document.getElementById(`v-${call.peer}`)) return;
+            const div = document.createElement('div');
+            div.className = 'video-box'; div.id = `v-${call.peer}`;
+            div.innerHTML = `<video id="vid-${call.peer}" autoplay playsinline></video><div class="u-name-tag">${call.peer}</div><div id="vol-${call.peer}" class="vol-bar"></div>`;
+            document.getElementById('video-grid').appendChild(div);
+            document.getElementById(`vid-${call.peer}`).srcObject = s;
+            monitorAudio(s, `vol-${call.peer}`);
+        });
+    }
+
+    function showStage(s) {
+        document.getElementById('stage').style.display = 'block';
+        const w = document.getElementById('stage-wrap');
+        w.innerHTML = `<video autoplay playsinline></video>`;
+        w.querySelector('video').srcObject = s;
+    }
+
+    function handleData(conn) {
+        conns[conn.peer] = conn;
+        conn.on('data', d => {
+            if(d.type === 'msg') addChat(d.name, d.val);
+            if(d.type === 'file') addChat(d.name, `<br><img class="preview-img" src="${d.val}"><br><a href="${d.val}" download="${d.fileName}" style="color:cyan">💾 ダウンロード</a>`);
+            if(d.type === 'react') spawnEmoji(d.val);
+        });
+    }
+
+    // 退出機能
+    function exitRoom() {
+        if(!confirm("退出しますか？")) return;
+        location.reload();
+    }
+
+    function sendMsg() {
+        const val = document.getElementById('chat-input').value;
+        if(!val) return;
+        if(val === 'vr') { isVTuber = !isVTuber; document.getElementById('local-vid').className = isVTuber ? 'vtuber' : ''; }
+        else {
+            addChat(currentUser.name, val);
+            Object.values(conns).forEach(c => c.send({type:'msg', name:currentUser.name, val}));
+        }
+        document.getElementById('chat-input').value = "";
+    }
+
+    function sendFile(input) {
+        const file = input.files[0];
+        const reader = new FileReader();
+        reader.onload = e => {
+            addChat(currentUser.name, `ファイルを送信: ${file.name}`);
+            Object.values(conns).forEach(c => c.send({type:'file', name:currentUser.name, val: e.target.result, fileName: file.name}));
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function toggleReact() { document.getElementById('react-menu').classList.toggle('show'); }
+    function sendReact(v) {
+        if(cooldown) return;
+        spawnEmoji(v);
+        Object.values(conns).forEach(c => c.send({type:'react', val:v}));
+        cooldown = true; setTimeout(() => cooldown = false, 10000);
+    }
+
+    function spawnEmoji(v) {
+        const e = document.createElement('div');
+        e.className = 'emoji-fly'; e.textContent = v;
+        e.style.left = Math.random() * 80 + '%';
+        document.body.appendChild(e);
+        setTimeout(() => e.remove(), 2000);
+    }
+
+    function addChat(n, v) {
+        const d = document.createElement('div');
+        d.innerHTML = `<b style="color:var(--accent)">${n}:</b> ${v}`;
+        const box = document.getElementById('chat-msgs');
+        box.appendChild(d); box.scrollTop = box.scrollHeight;
+    }
+
+    function pin(id) { showStage(document.getElementById(id).srcObject); }
+    function toggleMic() { myStream.getAudioTracks()[0].enabled = !myStream.getAudioTracks()[0].enabled; document.getElementById('mic-btn').classList.toggle('on'); }
+    function toggleCam() { myStream.getVideoTracks()[0].enabled = !myStream.getVideoTracks()[0].enabled; document.getElementById('cam-btn').classList.toggle('on'); }
+    function updateFPS() { fpsCount++; let now = performance.now(); if (now - lastTime >= 1000) { document.getElementById('fps-display').textContent = `FPS: ${fpsCount}`; fpsCount = 0; lastTime = now; } requestAnimationFrame(updateFPS); }
+    function monitorAudio(s, b) { const ctx = new AudioContext(); const src = ctx.createMediaStreamSource(s); const ana = ctx.createAnalyser(); src.connect(ana); const data = new Uint8Array(ana.frequencyBinCount); const upd = () => { ana.getByteFrequencyData(data); const avg = data.reduce((a,b)=>a+b)/data.length; if(document.getElementById(b)) document.getElementById(b).style.width = (avg*2)+'%'; requestAnimationFrame(upd); }; upd(); }
+</script>
+</body>
+</html>
